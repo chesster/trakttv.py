@@ -30,11 +30,8 @@ from docopt import docopt
 from clint.textui import puts, indent, colored
 from clint.textui import progress as progress_bar
 
-
-APIKEY   = ''
-USER     = ''
-PWD      = ''
-
+# https://github.com/chesster/SimpleIniFiller
+from simpleinifiller import SimpleIniFiller
 
 class TraktTvAPI(object):
 
@@ -112,7 +109,10 @@ class TraktTvController(object):
 
 
     def auth(self):
-        self.api = TraktTvAPI(APIKEY, USER, PWD)
+        ini = SimpleIniFiller('.trakttvpy', {
+            'TraktTv' : ['apikey', 'user', 'password']
+        })
+        self.api = TraktTvAPI(ini.config['TraktTv']['apikey'], ini.config['TraktTv']['user'], ini.config['TraktTv']['password'])
 
 
     def search(self):
