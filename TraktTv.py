@@ -6,6 +6,8 @@ TraktTvPy
 Usage:
   TraktTv.py search <term> [--add] [options]
   TraktTv.py watchlist [--delete] [--watch] [--unwatch] [options]
+  TraktTv.py moviesearch <term> [--add] [options]
+  TraktTv.py moviewatchlist [--delete] [--watch] [--unwatch] [options]
 
   TraktTv.py -h | --help
   TraktTv.py --version
@@ -78,12 +80,15 @@ class TraktTvAPI(object):
             setattr(self, "post_%s" % method_name, types.MethodType(method, self))
 
     @staticmethod
-    def _display_show(shows):
-        return  [{'title': s['title'], 'id' : s['tvdb_id']} for s in shows]
+    def _display_show(shows, key='tvdb_id'):
+        return  [{'title': s['title'], 'id' : s[key]} for s in shows]
 
     ##
     # API METHODS:
     ##
+    def search_movies(self, query, limit=10):
+        return TraktTvAPI._display_show(self.get_search_movies(query, limit), 'tmdb_id')
+
     def search(self, query, limit=10):
         return TraktTvAPI._display_show(self.get_search_shows(query, limit))
 
@@ -103,7 +108,7 @@ class TraktTvController(object):
         self.run()
 
     def run(self):
-        for command in ('auth','search','watchlist',):
+        for command in ('auth','search','watchlist', 'moviesearch', 'moviewatchlist'):
             if self.arguments.get(command, False) == True and hasattr(self, command):
                 return getattr(self, command)()
 
@@ -114,7 +119,9 @@ class TraktTvController(object):
         })
         self.api = TraktTvAPI(ini.config['TraktTv']['apikey'], ini.config['TraktTv']['user'], ini.config['TraktTv']['password'])
 
-
+    ##
+    # SHOWS
+    ##
     def search(self):
         results = self.api.search(self.arguments['<term>'], self.arguments['--limit'] or None)
         short_ids = self.__display_shows(results, self.arguments.get('--add', False))
@@ -143,7 +150,59 @@ class TraktTvController(object):
             command = raw_input('Enter episodes you\'ve watched (Ie: 2x3x10 2x3-3x3): ')
             self._watch_unwatch(command, short_ids)
 
+    ##
+    # MOVIES
+    ##
+    def moviesearch(self):
+        results = self.api.search_movies(self.arguments['<term>'], self.arguments['--limit'] or None)
+        short_ids = self.__display_movies(results, self.arguments.get('--add', False))
 
+        # ADD TO WATCHLIST
+        if self.arguments.get('--add'):
+            add_ids = raw_input('Enter Movie IDs to add to watchlist (space separated): ').split(' ')
+            self._add_movies_to_watchlist(*TraktTvController._short_id_to_tvdb_id(short_ids, add_ids))
+
+
+    def moviewatchlist(self):
+        results = self.api.my_movies()
+        limit = None if not self.arguments.get('--limit') else int(self.arguments.get('--limit'))
+        movie_short_ids = self.arguments.get('--delete', False) or self.arguments.get('--watch', False) or self.arguments.get('--unwatch', False)
+        short_ids = self.__display_movies(results[:limit], movie_short_ids)
+
+        if self.arguments.get('--delete'):
+            remove_ids = raw_input('Enter Movie IDs to remove from watchlist (space separated): ').split(' ')
+            self._remove_movies_from_watchlist(*TraktTvController._short_id_to_tvdb_id(short_ids, remove_ids))
+
+        if self.arguments.get('--unwatch'):
+            command = raw_input('Enter movies you haven\'t watched (Ie: 2 3): ')
+            self._watch_unwatch_movies(command, short_ids, False)
+
+        if self.arguments.get('--watch'):
+            command = raw_input('Enter movies you\'ve watched (Ie: 2 3): ')
+            self._watch_unwatch_movies(command, short_ids)
+
+
+    ##
+    # MOVIES
+    ##
+    def __display_movies(self, movies, include_ids=False):
+        print movies
+        pass
+
+    def _add_movies_to_watchlist(self, *args):
+        pass
+
+    def _remove_movies_from_watchlist(self, *args):
+        pass
+
+    def _watch_unwatch_movies(self, command, short_ids, watch=True):
+        pass
+
+
+
+    ##
+    # SHOWS
+    ##
     def _watch_unwatch(self, command, short_ids, watch=True):
         commands = TraktTvController.__parse_command(command)
         if not command:
@@ -363,5 +422,5 @@ if __name__ == '__main__':
         controller = TraktTvController()
     except EOFError, KeyboardInterrupt:
         puts(colored.red("\n[Exiting]"))
-    except urllib2.URLError:
-        puts("No Internet connection available " + colored.red("[Exiting]"))
+    # except urllib2.URLError:
+    #     puts("No Internet connection available " + colored.red("[Exiting]"))
