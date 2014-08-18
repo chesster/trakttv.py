@@ -6,15 +6,17 @@ TraktTvPy
 Usage:
   TraktTv.py search <term> [--add] [options]
   TraktTv.py watchlist [--delete] [--watch] [--unwatch] [options]
+  TraktTv.py moviesearch <term> [--add] [options]
+  TraktTv.py moviewatchlist [--delete] [--watch] [--unwatch] [options]
 
   TraktTv.py -h | --help
   TraktTv.py --version
 
 Options:
- -d --details                   Detailed view
- -s --skip-watch-info           Skips informing you of watched episodes (HUGE timesaver)
- -l <limit> --limit=<limit>     Limit the output
- --todo                         Skips watched episodes in detailed view
+ -d --details               Detailed view
+ -s --skip-watch-info       Skips informing you of watched episodes (HUGE timesaver)
+ -l <limit> --limit=<limit> Limit the output
+ --todo                     Skips watched episodes in detailed view
 
 """
 from __future__ import with_statement
@@ -55,6 +57,7 @@ class TraktTvAPI(object):
 
         def __post(args, post_data=None):
             path = ("https://api.trakt.tv/%s/%s/%s" % (args[0] + ('' if post_data else '.json'), self.api, "/".join([str(a) for a in args[1:]]))).rstrip('/')
+
             request = urllib2.Request(path)
             if post_data:
                 post_data.update({"username": self.user, "password": hashlib.sha1(self.pwd).hexdigest(),})
@@ -78,20 +81,36 @@ class TraktTvAPI(object):
             setattr(self, "post_%s" % method_name, types.MethodType(method, self))
 
     @staticmethod
-    def _display_show(shows):
-        return  [{'title': s['title'], 'id' : s['tvdb_id']} for s in shows]
+    def _display_show(shows, key='tvdb_id'):
+        return  [{
+            'title': s['title'], 
+            'year': s['year'], 
+            'tvdb_id': s.get('tvdb_id', ''),
+            'tmdb_id': s.get('tmdb_id', ''),
+            'imdb_id': s.get('imdb_id', ''),
+            'id' : s[key]
+        } for s in shows]
 
     ##
     # API METHODS:
     ##
+    def search_movies(self, query, limit=10):
+        return TraktTvAPI._display_show(self.get_search_movies(query, limit), 'tmdb_id')
+
     def search(self, query, limit=10):
         return TraktTvAPI._display_show(self.get_search_shows(query, limit))
 
     def my_shows(self):
         return TraktTvAPI._display_show(self.get_user_watchlist_shows(self.user))
 
+    def my_movies(self):
+        return TraktTvAPI._display_show(self.get_user_watchlist_movies(self.user), 'tmdb_id')
+
     def watched(self):
         return tv.get_user_library_shows_watched(self.user)
+
+    def watched_movies(self):
+        return tv.get_user_library_movies_watched(self.user)
 
 
 class TraktTvController(object):
@@ -103,7 +122,7 @@ class TraktTvController(object):
         self.run()
 
     def run(self):
-        for command in ('auth','search','watchlist',):
+        for command in ('auth','search','watchlist', 'moviesearch', 'moviewatchlist'):
             if self.arguments.get(command, False) == True and hasattr(self, command):
                 return getattr(self, command)()
 
@@ -115,6 +134,9 @@ class TraktTvController(object):
         self.api = TraktTvAPI(ini.config['TraktTv']['apikey'], ini.config['TraktTv']['user'], ini.config['TraktTv']['password'])
 
 
+    ##
+    # SHOWS
+    ##
     def search(self):
         results = self.api.search(self.arguments['<term>'], self.arguments['--limit'] or None)
         short_ids = self.__display_shows(results, self.arguments.get('--add', False))
@@ -183,6 +205,7 @@ class TraktTvController(object):
         else:
             puts(colored.yellow('No shows added'))
 
+
     def _remove_shows_from_watchlist(self, *args):
         if 0 < len(args):
             shows_to_remove = [{"tvdb_id": add_id} for add_id in args]
@@ -190,76 +213,6 @@ class TraktTvController(object):
             puts(colored.green('Shows removed'))
         else:
             puts(colored.yellow('No shows removed'))
-
-    @staticmethod
-    def _short_id_to_tvdb_id(short_ids, ids):
-        try:
-            return [short_ids[int(i)] for i in ids]
-        except ValueError, e:
-            puts(colored.red("Operation Canceled"))
-            return []
-
-    @staticmethod
-    def __pre_parse_command(command):
-        a_list = []
-        command = command.strip().split(" ")
-        for comm in command:
-            com_parts = comm.strip().split("x")
-            el = []
-            pos = 0
-            append = True
-            for p in com_parts:
-                pos += 1
-                ranges = p.split('-')
-                if len(ranges) > 1:
-                    rfrom = int(ranges[0])
-                    rto = int(ranges[1])
-                    for x in range(rfrom, rto+1):
-                        eltmp = [e for e in el]
-                        eltmp.append(int(x))
-                        for n in range(1, 4-len(eltmp)):
-                            eltmp.append(-1)
-                        a_list.append(eltmp)
-                    append = False
-                else:
-                    el.append(int(p))
-            if append:
-                for n in range(1, 4-len(el)):
-                    el.append(-1)
-                a_list.append(el)
-        return a_list
-
-
-    @staticmethod
-    def __parse_command(command):
-        try:
-            return TraktTvController.__pre_parse_command(command)
-        except ValueError:
-            puts(colored.red("Invalid range syntax"))
-            return None
-
-
-    def __progress_to_episode_array(self, progress):
-        episodes = {}
-        for show in progress:
-            show_id = show['show']['tvdb_id']
-            if show_id and 0 < int(show_id):
-                show_id = int(show_id)
-                if not episodes.get(show_id):
-                    episodes[show_id] = {}
-                for s in show['seasons']:
-                    season_id = int(s['season'])
-                    for e in s['episodes'].keys():
-                        if self.arguments.get('--todo'):
-                            if not s['episodes'][e]:
-                                if not episodes[show_id].get(season_id):
-                                    episodes[show_id][season_id] = {}
-                                episodes[show_id][season_id][int(e)] = s['episodes'][e]
-                        else:
-                            if not episodes[show_id].get(season_id):
-                                episodes[show_id][season_id] = {}
-                            episodes[show_id][season_id][int(e)] = s['episodes'][e]
-        return episodes
 
 
     def __display_shows(self, shows, include_ids=False):
@@ -356,6 +309,200 @@ class TraktTvController(object):
                                 if len(txt):
                                     puts(txt)
         return ids
+
+
+    ##
+    # MOVIES
+    ##
+    def moviesearch(self):
+        results = self.api.search_movies(self.arguments['<term>'], self.arguments['--limit'] or None)
+        short_ids = self.__display_movies(results, self.arguments.get('--add', False))
+
+        # ADD TO WATCHLIST
+        if self.arguments.get('--add'):
+            add_ids = raw_input('Enter Movie IDs to add to watchlist (space separated): ').split(' ')
+            self._add_movies_to_watchlist(*TraktTvController._short_id_to_tvdb_id(short_ids, add_ids))
+
+
+    def moviewatchlist(self):
+        results = self.api.my_movies()
+        limit = None if not self.arguments.get('--limit') else int(self.arguments.get('--limit'))
+        movie_short_ids = self.arguments.get('--delete', False) or self.arguments.get('--watch', False) or self.arguments.get('--unwatch', False)
+        short_ids = self.__display_movies(results[:limit], movie_short_ids)
+
+        if self.arguments.get('--delete'):
+            remove_ids = raw_input('Enter Movie IDs to remove from watchlist (space separated): ').split(' ')
+            self._remove_movies_from_watchlist(*TraktTvController._short_id_to_tvdb_id(short_ids, remove_ids))
+
+        if self.arguments.get('--unwatch'):
+            command = raw_input('Enter movies you haven\'t watched (Ie: 2 3): ')
+            self._watch_unwatch_movies(command, short_ids, False)
+
+        if self.arguments.get('--watch'):
+            command = raw_input('Enter movies you\'ve watched (Ie: 2 3): ')
+            self._watch_unwatch_movies(command, short_ids)
+
+
+    def __display_movies(self, movies, include_ids=False):
+
+        id            = 0
+        ids           = {}
+        progress_dict = {}
+        skip_lookup   = False
+
+
+        puts(colored.yellow('[Updating movie Info]'))
+
+        details = self.arguments.get('--details', False)
+
+        if not (self.arguments.get('-s', False) or  self.arguments.get('--skip-watch-info', False)):
+            progress = self.api.get_user_library_movies_watched(self.api.user)
+            for s in progress:
+                if s['tmdb_id'] and 0 < int(s['tmdb_id']):
+                    progress_dict[int(s['tmdb_id'])] = True
+            if details:
+                episode_dict = self.__progress_to_episode_array(progress)
+        else:
+            skip_lookup=True
+
+
+        def watched(watched_movies):
+            if watched_movies:
+                return colored.green('[ok]')
+            else:
+                return colored.red('[  ]')
+
+        puts(colored.yellow('\n[Movies]'))
+        format_str = "[{n:%s}]" % str(len(str(len(movies))))
+        for movie in movies:
+            watched_movies = progress_dict.get(int(movie['id']), 0)
+            if (watched_movies and self.arguments.get('--todo')) or not self.arguments.get('--todo'):
+                w = colored.yellow('[skip]') if skip_lookup else watched(watched_movies)
+                if include_ids:
+                    id += 1
+                    ids[id] = [{
+                        "tmdb_id": movie["tmdb_id"],
+                        "imdb_id": movie["imdb_id"],
+                        "title": movie["title"],
+                        "year": movie["year"]
+                    }]
+                    puts("%s %s %s (%s)" % (
+                        w,
+                        colored.yellow(format_str.format(n=id)),
+                        movie['title'].encode('utf8'),
+                        movie['year'],
+                    ))
+                else:
+                    puts("%s %s (%s)" % (
+                        w,
+                        movie['title'].encode('utf8'),
+                        movie['year'],
+                    ))
+        return ids
+
+
+    def _add_movies_to_watchlist(self, *movies):
+        if 0 < len(movies):
+            movies = [m[0] for m in movies]
+            add_result = self.api.post_movie_watchlist(movies=movies)
+            puts(colored.green('Movies added'))
+        else:
+            puts(colored.yellow('No movies added'))
+
+
+    def _remove_movies_from_watchlist(self, *movies):
+        if 0 < len(movies):
+            movies = [m[0] for m in movies]
+            remove_result = self.api.post_movie_unwatchlist(movies=movies)
+            puts(colored.green('Movies removed'))
+        else:
+            puts(colored.yellow('No movies removed'))
+
+
+    def _watch_unwatch_movies(self, command, short_ids, watch=True):
+        commands = TraktTvController.__parse_command(command)
+        if not command:
+            return
+        for command in progress_bar.bar(commands):
+            movie_id = short_ids[command[0]]
+            if watch:
+                result = self.api.post_movie_seen(movies=movie_id)
+            else:
+                result = self.api.post_movie_unseen(movies=movie_id)
+            self.api.post_movie_watchlist(movies=movie_id)
+
+
+    ##
+    # UNIWERSAL
+    ##
+    @staticmethod
+    def _short_id_to_tvdb_id(short_ids, ids):
+        try:
+            return [short_ids[int(i)] for i in ids]
+        except ValueError, e:
+            puts(colored.red("Operation Canceled"))
+            return []
+
+    @staticmethod
+    def __pre_parse_command(command):
+        a_list = []
+        command = command.strip().split(" ")
+        for comm in command:
+            com_parts = comm.strip().split("x")
+            el = []
+            pos = 0
+            append = True
+            for p in com_parts:
+                pos += 1
+                ranges = p.split('-')
+                if len(ranges) > 1:
+                    rfrom = int(ranges[0])
+                    rto = int(ranges[1])
+                    for x in range(rfrom, rto+1):
+                        eltmp = [e for e in el]
+                        eltmp.append(int(x))
+                        for n in range(1, 4-len(eltmp)):
+                            eltmp.append(-1)
+                        a_list.append(eltmp)
+                    append = False
+                else:
+                    el.append(int(p))
+            if append:
+                for n in range(1, 4-len(el)):
+                    el.append(-1)
+                a_list.append(el)
+        return a_list
+
+    @staticmethod
+    def __parse_command(command):
+        try:
+            return TraktTvController.__pre_parse_command(command)
+        except ValueError:
+            puts(colored.red("Invalid range syntax"))
+            return None
+
+
+    def __progress_to_episode_array(self, progress):
+        episodes = {}
+        for show in progress:
+            show_id = show['show']['tvdb_id']
+            if show_id and 0 < int(show_id):
+                show_id = int(show_id)
+                if not episodes.get(show_id):
+                    episodes[show_id] = {}
+                for s in show['seasons']:
+                    season_id = int(s['season'])
+                    for e in s['episodes'].keys():
+                        if self.arguments.get('--todo'):
+                            if not s['episodes'][e]:
+                                if not episodes[show_id].get(season_id):
+                                    episodes[show_id][season_id] = {}
+                                episodes[show_id][season_id][int(e)] = s['episodes'][e]
+                        else:
+                            if not episodes[show_id].get(season_id):
+                                episodes[show_id][season_id] = {}
+                            episodes[show_id][season_id][int(e)] = s['episodes'][e]
+        return episodes
 
 
 if __name__ == '__main__':
